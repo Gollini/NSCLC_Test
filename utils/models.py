@@ -67,6 +67,25 @@ class DeepGeneModel(torch.nn.Module):
     def forward(self, x):
         return self.main(x)
 
+class DeepctModel(torch.nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.main = nn.Sequential(
+            nn.Linear(input_size, 2000),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(2000, 4000),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.BatchNorm1d(4000),
+            nn.Linear(4000, 1),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        return self.main(x)
+
+
 class DeepRadiomicsModel(torch.nn.Module):
     def __init__(self, param):
         super().__init__()
