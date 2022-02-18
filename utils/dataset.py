@@ -47,6 +47,8 @@ class Dataset(torch.utils.data.Dataset):
         gene_exp = self.gene_exp.loc[pid, :].values
         # get labels
         label = self.labels.loc[pid, :].values
+        # print(file, pid, label)
+
         # get radiomics features
         radiomics = self.radiomics.loc[pid, :].values
 

@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import torchvision
+from torchsummary import summary
 from sklearn.feature_selection import f_classif, SelectKBest
 import pytorch_lightning as pl
 import torchmetrics
@@ -141,6 +142,18 @@ class DeepRadiomicsModel(torch.nn.Module):
         x = torch.cat((x_radiomics, x_frames), dim=1)
         x = self.main(x)
         return x
+
+class DirectPredictionCT(torch.nn.Module):
+    def __init__(self, param):
+        super().__init__()
+        if param.exp_model == 'resnet50':
+            self.model = torchvision.models.resnet50(pretrained=True)
+            self.model.fc = nn.Linear(2048, 2)
+            # print(self.resnet)
+
+    def forward(self, x):
+        # x = self.model(x_frames)
+        return self.model(x)
 
 # create an encoder for the gene expression data
 class GeneEncoder(torch.nn.Module):

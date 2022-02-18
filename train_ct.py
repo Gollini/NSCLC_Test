@@ -11,23 +11,25 @@ sys.path.append('../')
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
-from sklearn.model_selection import KFold
-from utils.models import DeepRadiomicsModel
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
+from utils.models import DirectPredictionCT
 from utils.dataset import Dataset
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--data_dir', type=str, default='./data')
 argparser.add_argument('--checkpoint_dir', type=str, default='./checkpoints')
 argparser.add_argument('--exp_id', type=str, default='./ig_100')
+argparser.add_argument('--exp_model', type=str, default='resnet50')
 argparser.add_argument('--lr', type=float, default=0.001)
 argparser.add_argument('--one_fold', action='store_true')
 argparser.add_argument('--fold', type=int, default=4)
 argparser.add_argument('--n_splits', type=int, default=5)
-argparser.add_argument('--seed', type=int, default=42)
+argparser.add_argument('--seed', type=int, default=0)
 argparser.add_argument('--batch_size', type=int, default=16)
 argparser.add_argument('--epochs', type=int, default=10000)
 argparser.add_argument('--image_channels', type=int, default=3, help='options: 3, 9')
-argparser.add_argument('--image_size', type=int, default=224, help='options: 112, 224')
+argparser.add_argument('--image_size', type=int, default=112, help='options: 32, 64, 112, 224')
 argparser.add_argument('--load_manual_features', action='store_true')
 param = argparser.parse_args()
 
@@ -37,9 +39,10 @@ results = {}
 
 # set up k-fold cross validation
 kf = KFold(n_splits=param.n_splits, shuffle=True, random_state=param.seed)
+# skf = StratifiedKFold(n_splits=param.n_splits, shuffle=True, random_state=param.seed)
 
-train_metrics = pd.DataFrame(columns=["epoch", "fold", "accuracy", "roc_auc", "precision", "recall", "f1"])
-test_metrics = pd.DataFrame(columns=["epoch", "fold", "accuracy", "roc_auc", "precision", "recall", "f1"])
+train_metrics = pd.DataFrame(columns=["epoch", "fold", "loss", "accuracy", "roc_auc", "precision", "recall", "f1"])
+test_metrics = pd.DataFrame(columns=["epoch", "fold", "loss", "accuracy", "roc_auc", "precision", "recall", "f1"])
 
 dataset = Dataset(param)
 
@@ -73,13 +76,13 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
 
     
     # Define model
-    rad_model = DeepRadiomicsModel(param).to(device)
+    ct_model = DirectPredictionCT(param).to(device)
     
-    rad_optimizer = optim.SGD(rad_model.parameters(), lr=param.lr, weight_decay=1e-6, momentum=0.9)
+    ct_optimizer = optim.SGD(ct_model.parameters(), lr=param.lr, weight_decay=1e-6, momentum=0.9)
 
     #Set stoping condition
-    min_loss = np.inf
-    tolerance = 150
+    min_acu = 0
+    tolerance = 20
     count_tol = 0
 
     # Train the model
@@ -98,43 +101,62 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
             
             # Get inputs
             x_radiomics, x_frames, gene_exp, labels = data
-            x_radiomics, x_frames, gene_exp = x_radiomics.float().to(device), x_frames.float().to(device), gene_exp.float().to(device)
+            x_frames, labels = x_frames.float().to(device), labels.to(device)
+            labels = labels.squeeze(dim=1)
 
             # Zero the gradients
-            rad_optimizer.zero_grad()
+            ct_optimizer.zero_grad()
             
             # Perform forward pass
-            exp_pred = rad_model(x_radiomics, x_frames)
+            r_pred = ct_model(x_frames)
             
             # Compute loss
-            e_loss = exp_loss(exp_pred, gene_exp)
-            
+            loss = exp_loss(r_pred, labels)
+                       
             # Perform backward pass
-            e_loss.backward()
-            
+            loss.backward()
+
             # Perform optimization
-            rad_optimizer.step()
+            ct_optimizer.step()
             
             # Print statistics
-            current_loss += e_loss.item()
+            current_loss += loss.item()
+
             if i % 500 == 499:
                 print('Loss after mini-batch %5d: %.3f' %
                     (i + 1, current_loss / 500))
                 current_loss = 0.0
 
-            loss_sum += e_loss.item()
+            loss_sum += loss.item()
+            y_list.extend(labels.view(-1).cpu().numpy())
+            y_pred_list.extend(torch.tensor([torch.argmax(a) for a in r_pred]).numpy())
+
+        train_acc = accuracy_score(y_list, y_pred_list)
+        train_roc_auc = roc_auc_score(y_list, y_pred_list)
+        train_precision = precision_score(y_list, y_pred_list)
+        train_recall = recall_score(y_list, y_pred_list)
+        train_f1 = f1_score(y_list, y_pred_list)
         
         # add metrics to dataframe
-        train_metrics = train_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum}, ignore_index=True)     
+        train_metrics = train_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum, "accuracy": train_acc, "roc_auc": train_roc_auc, "precision": train_precision, "recall": train_recall, "f1": train_f1}, ignore_index=True)     
         # Process is complete.
-        print('Training process has finished. Saving trained model.')
-        print(f'Train loss: {loss_sum:.3f}')
+        print('Training process has finished.')
+        print(f'Train Loss: {loss_sum:.3f}')
+        print(f'Train Accuracy: {train_acc:.3f}')
+        print(f'Train ROC AUC: {train_roc_auc:.3f}')
+        print(f'Train Precision: {train_precision:.3f}')
+        print(f'Train Recall: {train_recall:.3f}')
+        print(f'Train F1: {train_f1:.3f}')
+        print('--------------------------------')
 
         # Print about testing
         print('Starting testing')
 
         # Evaluationfor this fold
+        correct, total = 0, 0
         loss_sum = 0
+        y_list = []
+        y_pred_list = []
         with torch.no_grad():
 
             # Iterate over the test data and generate predictions
@@ -142,29 +164,49 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
 
                 # Get inputs
                 x_radiomics, x_frames, gene_exp, labels = data
-                x_radiomics, x_frames, gene_exp = x_radiomics.float().to(device), x_frames.float().to(device), gene_exp.float().to(device)
+                x_frames, labels = x_frames.float().to(device), labels.to(device)
+                labels = labels.squeeze(dim=1)
 
                 # Perform forward pass
-                exp_pred = rad_model(x_radiomics, x_frames)
+                r_pred = ct_model(x_frames)
                 
                 # Compute loss
-                e_loss = exp_loss(exp_pred, gene_exp)
+                loss = exp_loss(r_pred, labels)
 
+                # # Set total and correct
+                # _, predicted = torch.max(r_pred.data, 1)
+                # total += labels.size(0)
+                # correct += (predicted == labels).sum().item()
+
+                loss_sum += loss.item()
+                y_list.extend(labels.view(-1).cpu().numpy())
+                y_pred_list.extend(torch.tensor([torch.argmax(a) for a in r_pred]).numpy())
 
         # Print accuracy
-        print('Loss for fold %d: %d' % (fold, e_loss))
+        print('Test metrics for fold %d:' % (fold))
+        test_acc = accuracy_score(y_list, y_pred_list)
+        test_roc_auc = roc_auc_score(y_list, y_pred_list)
+        test_precision = precision_score(y_list, y_pred_list)
+        test_recall = recall_score(y_list, y_pred_list)
+        test_f1 = f1_score(y_list, y_pred_list)
+        print(f'Test Accuracy: {test_acc:.3f}')
+        print(f'Test ROC AUC: {test_roc_auc:.3f}')
+        print(f'Test Precision: {test_precision:.3f}')
+        print(f'Test Recall: {test_recall:.3f}')
+        print(f'Test F1: {test_f1:.3f}')
         print('--------------------------------')
 
-        if e_loss < min_loss:
-            print('Loss decreased from %0.4f to %0.4f. Saving model...' % (min_loss, e_loss))
+
+        if test_acc > min_acu:
+            print('Accuracy from %0.4f to %0.4f. Saving model...' % (min_acu, test_acc))
             print('--------------------------------')
-            min_loss = e_loss
-            results[fold] = min_loss
+            min_acu = test_acc
+            results[fold] = test_acc
             count_tol = 0
             # Saving the model
             if not os.path.exists(os.path.join(param.checkpoint_dir, param.exp_id)):
                 os.makedirs(os.path.join(param.checkpoint_dir, param.exp_id))
-            torch.save(rad_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'expression-model-fold-{}.pth'.format(fold)))
+            torch.save(ct_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'CT-model-fold-{}.pth'.format(fold)))
 
         else: count_tol += 1
         if count_tol > tolerance: 
@@ -173,7 +215,7 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
             break
 
         # add metrics to dataframe
-        test_metrics = test_metrics.append({"epoch": epoch+1, "fold": fold, "loss": e_loss.item()}, ignore_index=True)
+        test_metrics = test_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum, "accuracy": test_acc, "roc_auc": test_roc_auc, "precision": test_precision, "recall": test_recall, "f1": test_f1}, ignore_index=True)
         
 # Print fold results
 print(f'K-FOLD CROSS VALIDATION RESULTS FOR {param.n_splits} FOLDS')
