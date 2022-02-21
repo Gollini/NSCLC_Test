@@ -74,10 +74,17 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
                         dataset,
                         batch_size=len(dataset), sampler=test_subsampler)
 
-    
+    # Save input
+    input_dir = os.path.join(param.checkpoint_dir, param.exp_id, 'input')
+    if not os.path.exists(input_dir):
+                os.makedirs(input_dir)
+    for i, batch in enumerate(trainloader):
+        torchvision.utils.save_image(batch[0][:,0:1,:,:], os.path.join(input_dir, 'train_{}.png'.format(i)), normalize=True)
+    for i, batch in enumerate(testloader):
+        torchvision.utils.save_image(batch[0][:,0:1,:,:], os.path.join(input_dir, 'test{}.png'.format(i)), normalize=True)
+
     # Define model
     ct_model = DirectPredictionCT(param).to(device)
-    
     ct_optimizer = optim.SGD(ct_model.parameters(), lr=param.lr, weight_decay=1e-6, momentum=0.9)
 
     #Set stoping condition
@@ -100,7 +107,7 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
         for i, data in enumerate(trainloader, 0):
             
             # Get inputs
-            x_radiomics, x_frames, gene_exp, labels = data
+            x_frames, labels = data
             x_frames, labels = x_frames.float().to(device), labels.to(device)
             labels = labels.squeeze(dim=1)
 
@@ -136,6 +143,16 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
         train_precision = precision_score(y_list, y_pred_list)
         train_recall = recall_score(y_list, y_pred_list)
         train_f1 = f1_score(y_list, y_pred_list)
+
+        if train_acc > min_acu:
+            print('Accuracy from %0.4f to %0.4f. Saving model...' % (min_acu, train_acc))
+            print('--------------------------------')
+            min_acu = train_acc
+            count_tol = 0
+            # Saving the model
+            torch.save(ct_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'CT-model-fold-{}.pth'.format(fold)))
+
+        else: count_tol += 1
         
         # add metrics to dataframe
         train_metrics = train_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum, "accuracy": train_acc, "roc_auc": train_roc_auc, "precision": train_precision, "recall": train_recall, "f1": train_f1}, ignore_index=True)     
@@ -163,7 +180,7 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
             for i, data in enumerate(testloader, 0):
 
                 # Get inputs
-                x_radiomics, x_frames, gene_exp, labels = data
+                x_frames, labels = data
                 x_frames, labels = x_frames.float().to(device), labels.to(device)
                 labels = labels.squeeze(dim=1)
 
@@ -189,6 +206,8 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
         test_precision = precision_score(y_list, y_pred_list)
         test_recall = recall_score(y_list, y_pred_list)
         test_f1 = f1_score(y_list, y_pred_list)
+        results[fold] = test_acc
+
         print(f'Test Accuracy: {test_acc:.3f}')
         print(f'Test ROC AUC: {test_roc_auc:.3f}')
         print(f'Test Precision: {test_precision:.3f}')
@@ -196,27 +215,14 @@ for fold, (train_ids, test_ids) in enumerate(kf.split(dataset)):
         print(f'Test F1: {test_f1:.3f}')
         print('--------------------------------')
 
-
-        if test_acc > min_acu:
-            print('Accuracy from %0.4f to %0.4f. Saving model...' % (min_acu, test_acc))
-            print('--------------------------------')
-            min_acu = test_acc
-            results[fold] = test_acc
-            count_tol = 0
-            # Saving the model
-            if not os.path.exists(os.path.join(param.checkpoint_dir, param.exp_id)):
-                os.makedirs(os.path.join(param.checkpoint_dir, param.exp_id))
-            torch.save(ct_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'CT-model-fold-{}.pth'.format(fold)))
-
-        else: count_tol += 1
+        # add metrics to dataframe
+        test_metrics = test_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum, "accuracy": test_acc, "roc_auc": test_roc_auc, "precision": test_precision, "recall": test_recall, "f1": test_f1}, ignore_index=True)
+        
         if count_tol > tolerance: 
             print(f'Best performing epoch: {epoch-tolerance+1}')
             print('--------------------------------')
             break
 
-        # add metrics to dataframe
-        test_metrics = test_metrics.append({"epoch": epoch+1, "fold": fold, "loss": loss_sum, "accuracy": test_acc, "roc_auc": test_roc_auc, "precision": test_precision, "recall": test_recall, "f1": test_f1}, ignore_index=True)
-        
 # Print fold results
 print(f'K-FOLD CROSS VALIDATION RESULTS FOR {param.n_splits} FOLDS')
 print('--------------------------------')

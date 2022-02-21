@@ -16,6 +16,7 @@ class Dataset(torch.utils.data.Dataset):
         self.gene_exp = pd.read_csv(self.data_dir + '/gene_exp.csv', header=0, index_col=0)
         # read labels.csv file from data_dir
         self.labels = pd.read_csv(self.data_dir + '/labels_144.csv', header=0, index_col=0)
+        self.labels_117 = pd.read_csv(self.data_dir + '/labels.csv', header=0, index_col=0)
         self.radiomics_path = os.path.join(self.data_dir, 'ROIs_3frames', str(param.image_channels) + 'channels', 'resized_' + str(param.image_size))
         self.ct_path = os.path.join(self.data_dir, 'CT')
         if param.load_manual_features:
@@ -23,7 +24,7 @@ class Dataset(torch.utils.data.Dataset):
         else:
             self.radiomics = manual_feat_extraction(self.radiomics_path)
         # convert radiomics features to pandas dataframe with index as index of self.labels
-        self.radiomics = pd.DataFrame(self.radiomics, index=self.labels.index)
+        self.radiomics = pd.DataFrame(self.radiomics, index=self.labels_117.index)
         
     def __len__(self):
         return len(self.gene_exp)
@@ -42,18 +43,19 @@ class Dataset(torch.utils.data.Dataset):
         # load numpy array at file
         frames = np.load(file)
         frames = np.transpose(frames, (2, 0, 1))
+        
 
         # get gene expression data
-        gene_exp = self.gene_exp.loc[pid, :].values
+        # gene_exp = self.gene_exp.loc[pid, :].values
         # get labels
         label = self.labels.loc[pid, :].values
         # print(file, pid, label)
 
         # get radiomics features
-        radiomics = self.radiomics.loc[pid, :].values
+        # radiomics = self.radiomics.loc[pid, :].values
 
         # change the line below to return radiomics features and 9 frames too
-        return radiomics, frames, gene_exp, label
+        return frames, label
 
 # dataset = Dataset('data/')
 # sample = dataset[0]
