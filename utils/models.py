@@ -146,10 +146,10 @@ class DeepRadiomicsModel(torch.nn.Module):
 class DirectPredictionCT(torch.nn.Module):
     def __init__(self, param):
         super().__init__()
-        if param.exp_model == 'resnet50':
-            self.model = torchvision.models.resnet50(pretrained=True)
-            self.model.fc = nn.Linear(2048, 2)
-            # print(self.resnet)
+        if param.exp_model == 'resnet18':
+            self.model = torchvision.models.resnet18(pretrained=True)
+            self.model.fc = nn.Linear(512, 2)
+            # print(self.model)
 
     def forward(self, x):
         # x = self.model(x_frames)

@@ -27,7 +27,7 @@ class Dataset(torch.utils.data.Dataset):
         self.radiomics = pd.DataFrame(self.radiomics, index=self.labels_117.index)
         
     def __len__(self):
-        return len(self.gene_exp)
+        return len(self.labels)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -44,7 +44,6 @@ class Dataset(torch.utils.data.Dataset):
         frames = np.load(file)
         frames = np.transpose(frames, (2, 0, 1))
         
-
         # get gene expression data
         # gene_exp = self.gene_exp.loc[pid, :].values
         # get labels
