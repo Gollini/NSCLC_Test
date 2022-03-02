@@ -25,12 +25,13 @@ argparser.add_argument('--lr', type=float, default=0.00001)
 argparser.add_argument('--one_fold', action='store_true')
 argparser.add_argument('--fold', type=int, default=4)
 argparser.add_argument('--n_splits', type=int, default=5)
-argparser.add_argument('--seed', type=int, default=0)
+argparser.add_argument('--seed', type=int, default=42)
 argparser.add_argument('--batch_size', type=int, default=16)
 argparser.add_argument('--epochs', type=int, default=10000)
 argparser.add_argument('--image_channels', type=int, default=3, help='options: 3, 9')
 argparser.add_argument('--image_size', type=int, default=224, help='options: 32, 64, 112, 224')
 argparser.add_argument('--load_manual_features', action='store_true')
+argparser.add_argument('--transforms', type=str, default=None)
 param = argparser.parse_args()
 
 train_metrics = pd.DataFrame(columns=["epoch", "fold", "loss", "accuracy", "roc_auc", "precision", "recall", "f1"])
@@ -49,8 +50,8 @@ else:
 print('--------------------------------')
 
 # set criterion as loss for regression
-weights_144 = torch.FloatTensor([0.2778, 0.7222]).to(device)
-exp_loss = nn.CrossEntropyLoss(weight=weights_144)
+weights = torch.FloatTensor([0.2778, 0.7222]).to(device)
+exp_loss = nn.CrossEntropyLoss(weight=weights)
 results = {}
 
 y = dataset.labels
@@ -93,6 +94,7 @@ for fold, (train_ids, test_ids) in enumerate(skf.split(x, y)):
 
     #Set stoping condition
     min_acu = 0
+    min_loss = np.inf
     tolerance = 50
     count_tol = 0
 
@@ -150,12 +152,20 @@ for fold, (train_ids, test_ids) in enumerate(skf.split(x, y)):
         train_f1 = f1_score(y_list, y_pred_list)
 
         if train_acc > min_acu:
-            print('Accuracy from %0.4f to %0.4f. Saving model...' % (min_acu, train_acc))
+            print('Accuracy increased from %0.4f to %0.4f. Saving model...' % (min_acu, train_acc))
             print('--------------------------------')
             min_acu = train_acc
             count_tol = 0
             # Saving the model
             torch.save(ct_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'CT-model-fold-{}.pth'.format(fold)))
+
+        # if loss_sum < min_loss:
+        #     print('Loss decreased from %0.4f to %0.4f. Saving model...' % (min_loss, loss_sum))
+        #     print('--------------------------------')
+        #     min_loss = loss_sum
+        #     count_tol = 0
+        #     # Saving the model
+        #     torch.save(ct_model.state_dict(), os.path.join(param.checkpoint_dir, param.exp_id, 'CT-model-fold-{}.pth'.format(fold)))
 
         else: count_tol += 1
         

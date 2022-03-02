@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import torchvision
+import torchvision.transforms as transforms 
 import pandas as pd
 import os
 from utils.mf_extraction import manual_feat_extraction
@@ -15,8 +16,8 @@ class Dataset(torch.utils.data.Dataset):
         # read gene_exp.csv file from data_dir
         self.gene_exp = pd.read_csv(self.data_dir + '/gene_exp.csv', header=0, index_col=0)
         # read labels.csv file from data_dir
-        self.labels = pd.read_csv(self.data_dir + '/labels_144.csv', header=0, index_col=0)
-        self.labels_117 = pd.read_csv(self.data_dir + '/labels.csv', header=0, index_col=0)
+        self.labels_144 = pd.read_csv(self.data_dir + '/labels_144.csv', header=0, index_col=0)
+        self.labels = pd.read_csv(self.data_dir + '/labels.csv', header=0, index_col=0)
         self.radiomics_path = os.path.join(self.data_dir, 'ROIs_3frames', str(param.image_channels) + 'channels', 'resized_' + str(param.image_size))
         self.ct_path = os.path.join(self.data_dir, 'CT')
         if param.load_manual_features:
@@ -24,7 +25,16 @@ class Dataset(torch.utils.data.Dataset):
         else:
             self.radiomics = manual_feat_extraction(self.radiomics_path)
         # convert radiomics features to pandas dataframe with index as index of self.labels
-        self.radiomics = pd.DataFrame(self.radiomics, index=self.labels_117.index)
+        self.radiomics = pd.DataFrame(self.radiomics, index=self.labels.index)
+
+        if param.transforms is True:
+            self.data_transform = transforms.Compose([
+            # transforms.RandomSizedCrop(224),
+            # transforms.RandomHorizontalFlip(),
+            # transforms.ToTensor(),
+            transforms.functional.adjust_sharpness(2)
+        
+    ])
         
     def __len__(self):
         return len(self.labels)
@@ -43,6 +53,10 @@ class Dataset(torch.utils.data.Dataset):
         # load numpy array at file
         frames = np.load(file)
         frames = np.transpose(frames, (2, 0, 1))
+        
+        if self.param.transforms is True:
+            frames = self.data_transform(frames)
+
         
         # get gene expression data
         # gene_exp = self.gene_exp.loc[pid, :].values

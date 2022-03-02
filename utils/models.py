@@ -147,8 +147,16 @@ class DirectPredictionCT(torch.nn.Module):
     def __init__(self, param):
         super().__init__()
         if param.exp_model == 'resnet18':
-            self.model = torchvision.models.resnet18(pretrained=True)
+            self.model = torchvision.models.resnet18(pretrained=False)
             self.model.fc = nn.Linear(512, 2)
+
+        if param.image_channels == 9:
+            weight = self.model.conv1.weight.clone()
+            self.model.conv1 = nn.Conv2d(9, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            with torch.no_grad():
+                self.model.conv1.weight[:, :3] = weight
+                self.model.conv1.weight[:, 3:6] = weight
+                self.model.conv1.weight[:, 6:] = weight
             # print(self.model)
 
     def forward(self, x):
